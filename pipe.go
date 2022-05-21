@@ -1,38 +1,26 @@
 package main
 
-import "github.com/bloeys/gglm/gglm"
-
-type Transform struct {
-	Pos   *gglm.Vec3
-	Scale *gglm.Vec3
-	Rot   *gglm.Quat
-
-	IsDirty bool
-	TrMat   *gglm.TrMat
-}
+import (
+	"github.com/bloeys/flappy-nmage/quads"
+	"github.com/bloeys/gglm/gglm"
+)
 
 type Pipe struct {
-	ShouldRegen bool
-	Pos         *gglm.Vec3
-	OrigPos     *gglm.Vec3
-	TrMat       *gglm.TrMat
+	quads.Quad
 }
 
 func NewPipe(isTop bool) Pipe {
 
-	var q *gglm.Quat
-	if isTop {
-		q = gglm.NewQuatEuler(gglm.NewVec3(0, 90*gglm.Deg2Rad, 180*gglm.Deg2Rad))
-	} else {
-		q = gglm.NewQuatEuler(gglm.NewVec3(0, 90*gglm.Deg2Rad, 0))
+	pipeQuad, err := quads.NewQuad("pipe", "./res/textures/pipe-green.png")
+	if err != nil {
+		panic("Failed to create pipe quad. Err: " + err.Error())
 	}
 
-	x := gglm.NewTrMatId()
-	x.Rotate(q.Angle(), q.Axis())
+	if isTop {
+		*pipeQuad.RotReadWrite() = *gglm.NewQuatEuler(gglm.NewVec3(0, 0, 180*gglm.Deg2Rad))
+	}
+
 	return Pipe{
-		ShouldRegen: true,
-		Pos:         &gglm.Vec3{},
-		OrigPos:     &gglm.Vec3{},
-		TrMat:       x,
+		Quad: *pipeQuad,
 	}
 }

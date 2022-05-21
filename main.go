@@ -2,28 +2,29 @@ package main
 
 import (
 	"math/rand"
+	"time"
 
+	"github.com/bloeys/flappy-nmage/quads"
 	"github.com/bloeys/gglm/gglm"
-	"github.com/bloeys/nmage/assets"
 	"github.com/bloeys/nmage/engine"
 	"github.com/bloeys/nmage/input"
 	"github.com/bloeys/nmage/materials"
-	"github.com/bloeys/nmage/meshes"
 	"github.com/bloeys/nmage/renderer/rend3dgl"
 	"github.com/bloeys/nmage/timing"
 	nmageimgui "github.com/bloeys/nmage/ui/imgui"
 	"github.com/veandco/go-sdl2/sdl"
 )
 
+const (
+	pipeXSpacing float32 = 6
+	pipeYSpacing float32 = 6
+)
+
 var (
 	simpleMat *materials.Material
 
-	birdMesh  *meshes.Mesh
-	birdTex   assets.Texture
-	birdTrMat = gglm.NewTrMatId()
-
-	pipeMesh *meshes.Mesh
-	pipeTex  assets.Texture
+	birdSprite       *quads.Quad
+	backgroundSprite *quads.Quad
 
 	gravity float32 = -9.81 * 4
 
@@ -36,6 +37,8 @@ var (
 )
 
 func main() {
+
+	rand.Seed(time.Now().Unix())
 
 	//Init engine
 	err := engine.Init()
@@ -76,24 +79,14 @@ func (g *Game) Init() {
 	var err error
 
 	//Load assets
-	birdMesh, err = meshes.NewMesh("bird", "./res/models/bird.fbx", 0)
+	birdSprite, err = quads.NewQuad("bird", "./res/textures/yellowbird-midflap.png")
 	if err != nil {
-		panic("Failed to load mesh. Err:" + err.Error())
+		panic("Failed to load sprite. Err:" + err.Error())
 	}
 
-	birdTex, err = assets.LoadPNGTexture("./res/textures/bird.png")
+	backgroundSprite, err = quads.NewQuad("background", "./res/textures/background-day.png")
 	if err != nil {
-		panic("Failed to load texture. Err:" + err.Error())
-	}
-
-	pipeMesh, err = meshes.NewMesh("pipe", "./res/models/pipe.fbx", 0)
-	if err != nil {
-		panic("Failed to load mesh. Err:" + err.Error())
-	}
-
-	pipeTex, err = assets.LoadPNGTexture("./res/textures/pipe.png")
-	if err != nil {
-		panic("Failed to load texture. Err:" + err.Error())
+		panic("Failed to load sprite. Err:" + err.Error())
 	}
 
 	simpleMat = materials.NewMaterial("simpleMat", "./res/shaders/simple")
@@ -107,31 +100,34 @@ func (g *Game) Init() {
 	simpleMat.SetUnifMat4("viewMat", &viewMat.Mat4)
 
 	projMat := gglm.Ortho(-10, 10, 10, -10, 0.1, 500)
-	// projMat := gglm.Perspective(45*gglm.Deg2Rad, float32(1280)/float32(720), 0.1, 500)
 	simpleMat.SetUnifMat4("projMat", &projMat.Mat4)
 
 	//Set positions
-	birdTrMat.Scale(gglm.NewVec3(0.75, 1, 1))
-	birdTrMat.Translate(gglm.NewVec3(-5, 0, 0))
-	birdTrMat.Rotate(90*gglm.Deg2Rad, gglm.NewVec3(0, 1, 0))
+	birdSprite.ScaleReadWrite().Set(0.75, 1, 1)
+	birdSprite.PosReadWrite().Set(-5, 0, 2)
 }
 
 func (g *Game) Start() {
 
-	var pipeXSpacing float32 = 6
+	backgroundSprite.Entity.ScaleReadWrite().Set(10, 10, 1)
+
+	//Pipes
 	pos := gglm.NewVec3(12, 0, 0)
 	for i := 0; i < 10; i++ {
 
+		randY := rand.Float32() * 5
+		if rand.Float32() > 0.5 {
+			randY *= -1
+		}
+
 		p := NewPipe(true)
-		p.Pos.Add(gglm.NewVec3(pos.X(), 10, 0))
-		p.TrMat.Translate(gglm.NewVec3(pos.X(), 14, 0))
-		p.TrMat.Scale(gglm.NewVec3(0, 10, 0))
+		p.PosReadWrite().Add(gglm.NewVec3(pos.X(), 10+randY+pipeYSpacing*0.5, 1))
+		p.ScaleReadWrite().Set(1, 10, 1)
 		pipes = append(pipes, p)
 
 		p = NewPipe(false)
-		p.Pos.Add(gglm.NewVec3(pos.X(), -10, 0))
-		p.TrMat.Translate(gglm.NewVec3(pos.X(), -14, 0))
-		p.TrMat.Scale(gglm.NewVec3(0, 10, 0))
+		p.PosReadWrite().Add(gglm.NewVec3(pos.X(), -10+randY-pipeYSpacing*0.5, 1))
+		p.ScaleReadWrite().Set(1, 10, 1)
 		pipes = append(pipes, p)
 
 		pos.SetX(pos.X() + pipeXSpacing)
@@ -160,57 +156,69 @@ func (g *Game) Update() {
 
 	positionDelta := *birdVelocity
 	positionDelta.Scale(timing.DT())
-	birdTrMat.Translate(&positionDelta)
+	birdSprite.PosReadWrite().Add(&positionDelta)
 
 	//Move the pipes
 	spd := *pipesSpeed
 	spd.Scale(timing.DT())
 	for i := 0; i < len(pipes); i++ {
-		pipes[i].Pos.Add(&spd)
-		pipes[i].TrMat.Translate(&spd)
+		pipes[i].PosReadWrite().Add(&spd)
+	}
+
+	//Find the pipe with largest X pos
+	var largestXPosPipe *Pipe = &pipes[0]
+	for i := 1; i < len(pipes); i++ {
+		if pipes[i].PosRead().X() > largestXPosPipe.PosRead().X() {
+			largestXPosPipe = &pipes[i]
+		}
 	}
 
 	//Pipe logic
 	for i := 0; i < len(pipes); i += 2 {
 
-		xPos := pipes[i].Pos.X()
-		if !pipes[i].ShouldRegen {
+		xPos := pipes[i].PosRead().X()
+		if xPos > -12 {
 			continue
 		}
 
-		if xPos < 10 || xPos > 12 {
-			continue
-		}
-
-		pipes[i].ShouldRegen = false
 		randY := rand.Float32() * 5
 		if rand.Float32() > 0.5 {
 			randY *= -1
 		}
 
-		pipes[i].Pos.SetY(pipes[i].Pos.Y() + randY)
-		pipes[i+1].Pos.SetY(pipes[i].Pos.Y() + randY)
+		upperPipePos := pipes[i].PosReadWrite()
+		lowerPipePos := pipes[i+1].PosReadWrite()
 
-		trAmount := gglm.NewVec3(0, randY, 0)
-		pipes[i].TrMat.Translate(trAmount)
-		pipes[i+1].TrMat.Translate(trAmount)
+		newX := largestXPosPipe.PosRead().X() + pipeXSpacing
+		upperPipePos.SetX(newX)
+		lowerPipePos.SetX(newX)
+
+		upperPipePos.SetY(10 + randY + pipeYSpacing*0.5)
+		lowerPipePos.SetY(-10 + randY - pipeYSpacing*0.5)
 	}
 }
 
 func (g *Game) Render() {
 
-	//Draw bird
-	simpleMat.DiffuseTex = birdTex.TexID
-	simpleMat.SetAttribute(birdMesh.Buf)
-	g.win.Rend.Draw(birdMesh, birdTrMat, simpleMat)
+	//Draw background
+	simpleMat.DiffuseTex = backgroundSprite.Tex.TexID
+	simpleMat.SetAttribute(backgroundSprite.Mesh.Buf)
+	simpleMat.Bind()
+	g.win.Rend.Draw(backgroundSprite.Mesh, backgroundSprite.ModelMat(), simpleMat)
 
 	//Draw pipe
-	simpleMat.DiffuseTex = pipeTex.TexID
-	simpleMat.SetAttribute(pipeMesh.Buf)
+	simpleMat.DiffuseTex = pipes[0].Tex.TexID
+	simpleMat.SetAttribute(pipes[0].Mesh.Buf)
 	simpleMat.Bind()
 	for i := 0; i < len(pipes); i++ {
-		g.win.Rend.Draw(pipeMesh, pipes[i].TrMat, simpleMat)
+		g.win.Rend.Draw(pipes[0].Mesh, pipes[i].ModelMat(), simpleMat)
 	}
+
+	//Draw bird
+	simpleMat.DiffuseTex = birdSprite.Tex.TexID
+	simpleMat.SetAttribute(birdSprite.Mesh.Buf)
+	simpleMat.Bind()
+	g.win.Rend.Draw(birdSprite.Mesh, birdSprite.ModelMat(), simpleMat)
 }
 
 func (g *Game) FrameEnd() {
