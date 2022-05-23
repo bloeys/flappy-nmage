@@ -2,6 +2,7 @@
 
 uniform float ambientStrength = 0.1;
 uniform vec3 ambientLightColor = vec3(1, 1, 1);
+uniform vec3 tintColor = vec3(1, 1, 1);
 
 // uniform vec3 lightPos1;
 // uniform vec3 lightColor1;
@@ -22,6 +23,6 @@ void main()
 
     // vec3 finalAmbientColor = ambientLightColor * ambientStrength;
     vec4 texColor = texture(diffTex, vertUV0);
-    fragColor = texColor;
+    fragColor = vec4(texColor.rgb*tintColor, texColor.a);
     // fragColor = vec4(texColor.rgb * vertColor * (finalAmbientColor + diffStrength*lightColor1) , texColor.a);
 } 

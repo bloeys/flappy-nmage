@@ -12,18 +12,35 @@ import (
 	"github.com/bloeys/nmage/renderer/rend3dgl"
 	"github.com/bloeys/nmage/timing"
 	nmageimgui "github.com/bloeys/nmage/ui/imgui"
+	"github.com/inkyblackness/imgui-go/v4"
 	"github.com/veandco/go-sdl2/sdl"
 )
+
+//TODO: Scale of 1 gives objects that span two spatial units. How is this determined?
+//TODO: Way of displaying colliders that takes into account their width and height.
 
 const (
 	pipeXSpacing float32 = 6
 	pipeYSpacing float32 = 6
 )
 
+type GameState int
+
+const (
+	GameState_Playing GameState = iota
+	GameState_Lost
+)
+
 var (
+	game *Game
+
+	gameState GameState = GameState_Playing
+
 	simpleMat *materials.Material
 
-	birdSprite       *quads.Quad
+	birdSprite *quads.Quad
+	birdBoxCol *quads.BoxCollider2D
+
 	backgroundSprite *quads.Quad
 
 	gravity float32 = -9.81 * 4
@@ -34,6 +51,8 @@ var (
 	birdVelocity         = gglm.NewVec3(0, 0, 0)
 	dragAmount   float32 = 0.9
 	jumpForce    float32 = 30
+
+	font imgui.Font
 )
 
 func main() {
@@ -57,13 +76,13 @@ func main() {
 
 	window.SDLWin.SetTitle("Flappy Bird")
 
-	g := &Game{
+	game = &Game{
 		shouldRun: true,
 		win:       window,
 		imguiInfo: nmageimgui.NewImGUI(),
 	}
 
-	engine.Run(g)
+	engine.Run(game)
 }
 
 var _ engine.Game = &Game{}
@@ -83,6 +102,8 @@ func (g *Game) Init() {
 	if err != nil {
 		panic("Failed to load sprite. Err:" + err.Error())
 	}
+
+	birdBoxCol = quads.NewBoxCollider2D(2, 2)
 
 	backgroundSprite, err = quads.NewQuad("background", "./res/textures/background-day.png")
 	if err != nil {
@@ -105,6 +126,8 @@ func (g *Game) Init() {
 	//Set positions
 	birdSprite.ScaleReadWrite().Set(0.75, 1, 1)
 	birdSprite.PosReadWrite().Set(-5, 0, 2)
+
+	font = g.imguiInfo.AddFontTTF("./res/fonts/courier-prime.regular.ttf", 64, nil, nil)
 }
 
 func (g *Game) Start() {
@@ -120,14 +143,28 @@ func (g *Game) Start() {
 			randY *= -1
 		}
 
+		//Top pipe and its collider
 		p := NewPipe(true)
 		p.PosReadWrite().Add(gglm.NewVec3(pos.X(), 10+randY+pipeYSpacing*0.5, 1))
 		p.ScaleReadWrite().Set(1, 10, 1)
+
+		pipePos := p.PosRead()
+		p.Col.PosReadWrite().Set(pipePos.X(), pipePos.Y(), pipePos.Z()+0.1)
+		*p.Col.ScaleReadWrite() = *p.ScaleRead()
+		// *p.Col.RotReadWrite() = *p.RotRead()
+
 		pipes = append(pipes, p)
 
+		//Bottom pipe and its collider
 		p = NewPipe(false)
 		p.PosReadWrite().Add(gglm.NewVec3(pos.X(), -10+randY-pipeYSpacing*0.5, 1))
 		p.ScaleReadWrite().Set(1, 10, 1)
+
+		pipePos = p.PosRead()
+		p.Col.PosReadWrite().Set(pipePos.X(), pipePos.Y(), pipePos.Z()+0.1)
+		*p.Col.ScaleReadWrite() = *p.ScaleRead()
+		// *p.Col.RotReadWrite() = *p.RotRead()
+
 		pipes = append(pipes, p)
 
 		pos.SetX(pos.X() + pipeXSpacing)
@@ -144,6 +181,16 @@ func (g *Game) Update() {
 		g.shouldRun = false
 	}
 
+	switch gameState {
+	case GameState_Playing:
+		Playing()
+	case GameState_Lost:
+		Lost()
+	}
+
+}
+
+func Playing() {
 	//Move the bird
 	if birdVelocity.Y() > 0 {
 		birdVelocity.SetY(birdVelocity.Y() * dragAmount)
@@ -158,11 +205,20 @@ func (g *Game) Update() {
 	positionDelta.Scale(timing.DT())
 	birdSprite.PosReadWrite().Add(&positionDelta)
 
+	//Move bird collider
+	birdPos := birdSprite.PosRead()
+	birdScale := birdSprite.ScaleRead()
+	birdBoxCol.PosReadWrite().Set(birdPos.X(), birdPos.Y(), birdPos.Z()+0.1)
+	*birdBoxCol.ScaleReadWrite() = *birdScale
+
 	//Move the pipes
 	spd := *pipesSpeed
 	spd.Scale(timing.DT())
 	for i := 0; i < len(pipes); i++ {
 		pipes[i].PosReadWrite().Add(&spd)
+
+		pipePos := pipes[i].PosRead()
+		pipes[i].Col.PosReadWrite().Set(pipePos.X(), pipePos.Y(), pipePos.Z()+0.1)
 	}
 
 	//Find the pipe with largest X pos
@@ -195,7 +251,64 @@ func (g *Game) Update() {
 
 		upperPipePos.SetY(10 + randY + pipeYSpacing*0.5)
 		lowerPipePos.SetY(-10 + randY - pipeYSpacing*0.5)
+
+		pipePos := pipes[i].PosRead()
+		pipes[i].Col.PosReadWrite().Set(pipePos.X(), pipePos.Y(), pipePos.Z()+0.1)
+
+		pipePos = pipes[i+1].PosRead()
+		pipes[i+1].Col.PosReadWrite().Set(pipePos.X(), pipePos.Y(), pipePos.Z()+0.1)
 	}
+
+	for i := 0; i < len(pipes); i++ {
+		if !isColliding(birdBoxCol, pipes[i].Col) {
+			continue
+		}
+
+		gameState = GameState_Lost
+	}
+}
+
+func Lost() {
+
+	open := true
+
+	w, h := game.win.SDLWin.GetSize()
+
+	lostText := "You Lost!"
+	textSize := imgui.CalcTextSize(lostText, false, 100000)
+
+	imgui.SetNextWindowPos(imgui.Vec2{})
+	imgui.SetNextWindowSize(imgui.Vec2{X: float32(w), Y: float32(h)})
+	imgui.BeginV("ui",
+		&open,
+		imgui.WindowFlagsNoBackground|imgui.WindowFlagsNoCollapse|
+			imgui.WindowFlagsNoResize|imgui.WindowFlagsNoMove|
+			imgui.WindowFlagsNoDecoration)
+
+	imgui.PushFont(font)
+	imgui.SetCursorPos(imgui.Vec2{X: (float32(w) - textSize.X) * 0.5, Y: (float32(h) - textSize.Y) * 0.5})
+
+	imgui.PushStyleColor(imgui.StyleColorText, imgui.Vec4{X: 1, W: 1})
+	imgui.Text(lostText)
+	imgui.PopStyleColor()
+
+	imgui.PopFont()
+	imgui.End()
+}
+
+func isColliding(a, b *quads.BoxCollider2D) bool {
+
+	aBotLeft := a.BotLeft()
+	aTopRight := a.TopRight()
+
+	bBotLeft := b.BotLeft()
+	bTopRight := b.TopRight()
+
+	return aBotLeft.X() < bTopRight.X() &&
+		bBotLeft.X() < aTopRight.X() &&
+
+		bBotLeft.Y() < aTopRight.Y() &&
+		aBotLeft.Y() < bTopRight.Y()
 }
 
 func (g *Game) Render() {
@@ -214,12 +327,62 @@ func (g *Game) Render() {
 		g.win.Rend.Draw(pipes[0].Mesh, pipes[i].ModelMat(), simpleMat)
 	}
 
+	//Draw pipe colliders
+	// simpleMat.DiffuseTex = pipes[0].Col.Tex.TexID
+	// simpleMat.SetAttribute(pipes[0].Col.Mesh.Buf)
+	// simpleMat.Bind()
+
+	// //First pipe collider is red
+	// simpleMat.SetUnifVec3("tintColor", gglm.NewVec3(1, 0, 0))
+	// g.win.Rend.Draw(pipes[0].Col.Mesh, pipes[0].Col.ModelMat(), simpleMat)
+
+	// simpleMat.SetUnifVec3("tintColor", gglm.NewVec3(0, 0, 1))
+	// for i := 1; i < len(pipes); i++ {
+	// 	g.win.Rend.Draw(pipes[0].Col.Mesh, pipes[i].Col.ModelMat(), simpleMat)
+	// }
+	// simpleMat.SetUnifVec3("tintColor", gglm.NewVec3(1, 1, 1))
+
 	//Draw bird
 	simpleMat.DiffuseTex = birdSprite.Tex.TexID
 	simpleMat.SetAttribute(birdSprite.Mesh.Buf)
 	simpleMat.Bind()
 	g.win.Rend.Draw(birdSprite.Mesh, birdSprite.ModelMat(), simpleMat)
+
+	//Draw bird collider
+	// simpleMat.SetUnifVec3("tintColor", gglm.NewVec3(0, 1, 0))
+	// simpleMat.DiffuseTex = birdBoxCol.Tex.TexID
+	// simpleMat.SetAttribute(birdBoxCol.Mesh.Buf)
+	// simpleMat.Bind()
+	// g.win.Rend.Draw(birdBoxCol.Mesh, birdBoxCol.ModelMat(), simpleMat)
+	// simpleMat.SetUnifVec3("tintColor", gglm.NewVec3(1, 1, 1))
+
+	// //Test pipe
+	// if col1 == nil {
+
+	// 	col1 = quads.NewBoxCollider2D(2, 2)
+	// 	col2 = quads.NewBoxCollider2D(2, 2)
+
+	// 	col1.PosReadWrite().Set(0, 0, 4)
+	// 	col1.ScaleReadWrite().Set(1, 1, 1)
+
+	// 	col2.PosReadWrite().Set(2, 0, 4.1)
+	// 	col2.ScaleReadWrite().Set(1, 1, 1)
+
+	// 	println(col1.PosRead().String(), col1.BotLeft().String(), "; ", col1.TopRight().String())
+	// 	println(col2.PosRead().String(), col2.BotLeft().String(), "; ", col2.TopRight().String())
+	// 	println(isColliding(col1, col2))
+	// }
+
+	// simpleMat.SetUnifVec3("tintColor", gglm.NewVec3(1, 0, 0))
+	// simpleMat.DiffuseTex = col1.Tex.TexID
+	// simpleMat.SetAttribute(col1.Mesh.Buf)
+	// simpleMat.Bind()
+	// g.win.Rend.Draw(col1.Mesh, col1.ModelMat(), simpleMat)
+	// g.win.Rend.Draw(col1.Mesh, col2.ModelMat(), simpleMat)
+	// simpleMat.SetUnifVec3("tintColor", gglm.NewVec3(1, 1, 1))
 }
+
+// var col1, col2 *quads.BoxCollider2D
 
 func (g *Game) FrameEnd() {
 

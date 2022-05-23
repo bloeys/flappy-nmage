@@ -7,6 +7,7 @@ import (
 
 type Pipe struct {
 	quads.Quad
+	Col *quads.BoxCollider2D
 }
 
 func NewPipe(isTop bool) Pipe {
@@ -22,5 +23,6 @@ func NewPipe(isTop bool) Pipe {
 
 	return Pipe{
 		Quad: *pipeQuad,
+		Col:  quads.NewBoxCollider2D(2, 2),
 	}
 }
