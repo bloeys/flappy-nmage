@@ -16,7 +16,8 @@ import (
 	"github.com/veandco/go-sdl2/sdl"
 )
 
-//TODO: Scale of 1 gives objects that span two spatial units. How is this determined?
+//TODO: Lose if bird goes outside screen
+//TODO: Sounds!
 //TODO: Way of displaying colliders that takes into account their width and height.
 
 const (
@@ -34,9 +35,7 @@ const (
 var (
 	game *Game
 
-	gameState GameState = GameState_Playing
-
-	simpleMat *materials.Material
+	simpleMat, digitMat *materials.Material
 
 	birdSprite *quads.Quad
 	birdBoxCol *quads.BoxCollider2D
@@ -53,6 +52,12 @@ var (
 	jumpForce    float32 = 30
 
 	font imgui.Font
+
+	score                uint
+	lastTouchedMiddleCol *quads.BoxCollider2D
+
+	//Digit quads
+	digitQuads []*quads.Quad
 )
 
 func main() {
@@ -80,6 +85,7 @@ func main() {
 		shouldRun: true,
 		win:       window,
 		imguiInfo: nmageimgui.NewImGUI(),
+		gameState: GameState_Playing,
 	}
 
 	engine.Run(game)
@@ -91,6 +97,7 @@ type Game struct {
 	shouldRun bool
 	win       *engine.Window
 	imguiInfo nmageimgui.ImguiInfo
+	gameState GameState
 }
 
 func (g *Game) Init() {
@@ -103,7 +110,7 @@ func (g *Game) Init() {
 		panic("Failed to load sprite. Err:" + err.Error())
 	}
 
-	birdBoxCol = quads.NewBoxCollider2D(2, 2)
+	birdBoxCol = quads.NewBoxCollider2D(1, 1)
 
 	backgroundSprite, err = quads.NewQuad("background", "./res/textures/background-day.png")
 	if err != nil {
@@ -111,6 +118,7 @@ func (g *Game) Init() {
 	}
 
 	simpleMat = materials.NewMaterial("simpleMat", "./res/shaders/simple")
+	digitMat = materials.NewMaterial("digitMat", "./res/shaders/simple")
 
 	//Setup camera
 	camPos := gglm.NewVec3(0, 0, -10)
@@ -119,20 +127,89 @@ func (g *Game) Init() {
 
 	viewMat := gglm.LookAt(camPos, targetPos, gglm.NewVec3(0, 1, 0))
 	simpleMat.SetUnifMat4("viewMat", &viewMat.Mat4)
+	digitMat.SetUnifMat4("viewMat", &viewMat.Mat4)
 
 	projMat := gglm.Ortho(-10, 10, 10, -10, 0.1, 500)
 	simpleMat.SetUnifMat4("projMat", &projMat.Mat4)
+	digitMat.SetUnifMat4("projMat", &projMat.Mat4)
 
 	//Set positions
-	birdSprite.ScaleReadWrite().Set(0.75, 1, 1)
+	birdSprite.ScaleReadWrite().Set(1.5, 2, 1)
 	birdSprite.PosReadWrite().Set(-5, 0, 2)
 
 	font = g.imguiInfo.AddFontTTF("./res/fonts/courier-prime.regular.ttf", 64, nil, nil)
+
+	g.LoadDigitQuads()
+}
+
+func (g *Game) LoadDigitQuads() {
+
+	digitQuads = make([]*quads.Quad, 0, 10)
+
+	digit, err := quads.NewQuad("background", "./res/textures/0.png")
+	if err != nil {
+		panic("Failed to load sprite. Err:" + err.Error())
+	}
+	digitQuads = append(digitQuads, digit)
+
+	digit, err = quads.NewQuad("background", "./res/textures/1.png")
+	if err != nil {
+		panic("Failed to load sprite. Err:" + err.Error())
+	}
+	digitQuads = append(digitQuads, digit)
+
+	digit, err = quads.NewQuad("background", "./res/textures/2.png")
+	if err != nil {
+		panic("Failed to load sprite. Err:" + err.Error())
+	}
+	digitQuads = append(digitQuads, digit)
+
+	digit, err = quads.NewQuad("background", "./res/textures/3.png")
+	if err != nil {
+		panic("Failed to load sprite. Err:" + err.Error())
+	}
+	digitQuads = append(digitQuads, digit)
+
+	digit, err = quads.NewQuad("background", "./res/textures/4.png")
+	if err != nil {
+		panic("Failed to load sprite. Err:" + err.Error())
+	}
+	digitQuads = append(digitQuads, digit)
+
+	digit, err = quads.NewQuad("background", "./res/textures/5.png")
+	if err != nil {
+		panic("Failed to load sprite. Err:" + err.Error())
+	}
+	digitQuads = append(digitQuads, digit)
+
+	digit, err = quads.NewQuad("background", "./res/textures/6.png")
+	if err != nil {
+		panic("Failed to load sprite. Err:" + err.Error())
+	}
+	digitQuads = append(digitQuads, digit)
+
+	digit, err = quads.NewQuad("background", "./res/textures/7.png")
+	if err != nil {
+		panic("Failed to load sprite. Err:" + err.Error())
+	}
+	digitQuads = append(digitQuads, digit)
+
+	digit, err = quads.NewQuad("background", "./res/textures/8.png")
+	if err != nil {
+		panic("Failed to load sprite. Err:" + err.Error())
+	}
+	digitQuads = append(digitQuads, digit)
+
+	digit, err = quads.NewQuad("background", "./res/textures/9.png")
+	if err != nil {
+		panic("Failed to load sprite. Err:" + err.Error())
+	}
+	digitQuads = append(digitQuads, digit)
 }
 
 func (g *Game) Start() {
 
-	backgroundSprite.Entity.ScaleReadWrite().Set(10, 10, 1)
+	backgroundSprite.Entity.ScaleReadWrite().Set(20, 20, 1)
 
 	//Pipes
 	pos := gglm.NewVec3(12, 0, 0)
@@ -146,19 +223,20 @@ func (g *Game) Start() {
 		//Top pipe and its collider
 		p := NewPipe(true)
 		p.PosReadWrite().Add(gglm.NewVec3(pos.X(), 10+randY+pipeYSpacing*0.5, 1))
-		p.ScaleReadWrite().Set(1, 10, 1)
+		p.ScaleReadWrite().Set(2, 20, 1)
 
 		pipePos := p.PosRead()
 		p.Col.PosReadWrite().Set(pipePos.X(), pipePos.Y(), pipePos.Z()+0.1)
 		*p.Col.ScaleReadWrite() = *p.ScaleRead()
-		// *p.Col.RotReadWrite() = *p.RotRead()
 
+		*p.MiddleCol.PosReadWrite() = *pipePos
+		p.MiddleCol.ScaleReadWrite().Set(0.1, 30, 1)
 		pipes = append(pipes, p)
 
 		//Bottom pipe and its collider
 		p = NewPipe(false)
 		p.PosReadWrite().Add(gglm.NewVec3(pos.X(), -10+randY-pipeYSpacing*0.5, 1))
-		p.ScaleReadWrite().Set(1, 10, 1)
+		p.ScaleReadWrite().Set(2, 20, 1)
 
 		pipePos = p.PosRead()
 		p.Col.PosReadWrite().Set(pipePos.X(), pipePos.Y(), pipePos.Z()+0.1)
@@ -172,7 +250,6 @@ func (g *Game) Start() {
 }
 
 func (g *Game) FrameStart() {
-
 }
 
 func (g *Game) Update() {
@@ -181,16 +258,16 @@ func (g *Game) Update() {
 		g.shouldRun = false
 	}
 
-	switch gameState {
+	switch g.gameState {
 	case GameState_Playing:
-		Playing()
+		g.Playing()
 	case GameState_Lost:
-		Lost()
+		g.Lost()
 	}
 
 }
 
-func Playing() {
+func (g *Game) Playing() {
 	//Move the bird
 	if birdVelocity.Y() > 0 {
 		birdVelocity.SetY(birdVelocity.Y() * dragAmount)
@@ -219,6 +296,10 @@ func Playing() {
 
 		pipePos := pipes[i].PosRead()
 		pipes[i].Col.PosReadWrite().Set(pipePos.X(), pipePos.Y(), pipePos.Z()+0.1)
+
+		if pipes[i].IsTop {
+			*pipes[i].MiddleCol.PosReadWrite() = *pipePos
+		}
 	}
 
 	//Find the pipe with largest X pos
@@ -259,34 +340,86 @@ func Playing() {
 		pipes[i+1].Col.PosReadWrite().Set(pipePos.X(), pipePos.Y(), pipePos.Z()+0.1)
 	}
 
+	//Pipe collisions
 	for i := 0; i < len(pipes); i++ {
 		if !isColliding(birdBoxCol, pipes[i].Col) {
 			continue
 		}
 
-		gameState = GameState_Lost
+		g.gameState = GameState_Lost
+	}
+
+	//Pipe score collisions
+	for i := 0; i < len(pipes); i++ {
+
+		if !pipes[i].IsTop || !isColliding(birdBoxCol, pipes[i].MiddleCol) {
+			continue
+		}
+
+		//Don't score twice in a row with the same collider
+		if pipes[i].MiddleCol == lastTouchedMiddleCol {
+			continue
+		}
+
+		score++
+		lastTouchedMiddleCol = pipes[i].MiddleCol
 	}
 }
 
-func Lost() {
+func (g *Game) DrawScore() {
+
+	score := score
+	origScore := score
+
+	digitCount := 0
+	if score == 0 {
+		digitCount = 1
+	}
+
+	for score > 0 {
+		digitCount++
+		score /= 10
+	}
+
+	score = origScore
+	var xOffsetDelta float32 = 1.6
+	xOffset := float32(digitCount-1) * xOffsetDelta * 0.5
+	digitMat.SetAttribute(digitQuads[0].Mesh.Buf)
+	for i := 0; i < 1 || score > 0; i++ {
+
+		digit := score % 10
+		score /= 10
+
+		q := digitQuads[digit]
+		q.PosReadWrite().Set(xOffset, 9, 7)
+		q.ScaleReadWrite().Set(1.5, 1.5, 1)
+		xOffset -= xOffsetDelta
+
+		digitMat.DiffuseTex = q.Tex.TexID
+		digitMat.Bind()
+		g.win.Rend.Draw(digitQuads[0].Mesh, q.ModelMat(), digitMat)
+	}
+}
+
+func (g *Game) Lost() {
 
 	open := true
 
 	w, h := game.win.SDLWin.GetSize()
 
-	lostText := "You Lost!"
+	lostText := "You Lost!\nPress Enter to restart..."
 	textSize := imgui.CalcTextSize(lostText, false, 100000)
 
 	imgui.SetNextWindowPos(imgui.Vec2{})
 	imgui.SetNextWindowSize(imgui.Vec2{X: float32(w), Y: float32(h)})
-	imgui.BeginV("ui",
+	imgui.BeginV("lost",
 		&open,
 		imgui.WindowFlagsNoBackground|imgui.WindowFlagsNoCollapse|
 			imgui.WindowFlagsNoResize|imgui.WindowFlagsNoMove|
 			imgui.WindowFlagsNoDecoration)
 
 	imgui.PushFont(font)
-	imgui.SetCursorPos(imgui.Vec2{X: (float32(w) - textSize.X) * 0.5, Y: (float32(h) - textSize.Y) * 0.5})
+	imgui.SetCursorPos(imgui.Vec2{X: (float32(w)/2 - textSize.X*2), Y: (float32(h)/2 - textSize.Y)})
 
 	imgui.PushStyleColor(imgui.StyleColorText, imgui.Vec4{X: 1, W: 1})
 	imgui.Text(lostText)
@@ -294,6 +427,43 @@ func Lost() {
 
 	imgui.PopFont()
 	imgui.End()
+
+	//Reset pipe positions and restart the game
+	if input.KeyClicked(sdl.K_RETURN) || input.KeyClicked(sdl.K_RETURN2) {
+
+		score = 0
+		g.gameState = GameState_Playing
+
+		//Reset bird state
+		birdVelocity = gglm.NewVec3(0, 0, 0)
+		birdSprite.PosReadWrite().Set(-5, 0, 2)
+
+		//Reset pipe state
+		pos := gglm.NewVec3(12, 0, 0)
+		for i := 0; i < len(pipes); i += 2 {
+
+			randY := rand.Float32() * 5
+			if rand.Float32() > 0.5 {
+				randY *= -1
+			}
+
+			//Top pipe and its collider
+			p := &pipes[i]
+			*p.PosReadWrite() = *gglm.NewVec3(pos.X(), 10+randY+pipeYSpacing*0.5, 1)
+
+			pipePos := p.PosRead()
+			p.Col.PosReadWrite().Set(pipePos.X(), pipePos.Y(), pipePos.Z()+0.1)
+			*p.MiddleCol.PosReadWrite() = *pipePos
+
+			//Bottom pipe and its collider
+			p = &pipes[i+1]
+			*p.PosReadWrite() = *gglm.NewVec3(pos.X(), -10+randY-pipeYSpacing*0.5, 1)
+
+			pipePos = p.PosRead()
+			p.Col.PosReadWrite().Set(pipePos.X(), pipePos.Y(), pipePos.Z()+0.1)
+			pos.SetX(pos.X() + pipeXSpacing)
+		}
+	}
 }
 
 func isColliding(a, b *quads.BoxCollider2D) bool {
@@ -327,7 +497,7 @@ func (g *Game) Render() {
 		g.win.Rend.Draw(pipes[0].Mesh, pipes[i].ModelMat(), simpleMat)
 	}
 
-	//Draw pipe colliders
+	// //Draw pipe colliders
 	// simpleMat.DiffuseTex = pipes[0].Col.Tex.TexID
 	// simpleMat.SetAttribute(pipes[0].Col.Mesh.Buf)
 	// simpleMat.Bind()
@@ -348,7 +518,7 @@ func (g *Game) Render() {
 	simpleMat.Bind()
 	g.win.Rend.Draw(birdSprite.Mesh, birdSprite.ModelMat(), simpleMat)
 
-	//Draw bird collider
+	// //Draw bird collider
 	// simpleMat.SetUnifVec3("tintColor", gglm.NewVec3(0, 1, 0))
 	// simpleMat.DiffuseTex = birdBoxCol.Tex.TexID
 	// simpleMat.SetAttribute(birdBoxCol.Mesh.Buf)
@@ -359,14 +529,14 @@ func (g *Game) Render() {
 	// //Test pipe
 	// if col1 == nil {
 
-	// 	col1 = quads.NewBoxCollider2D(2, 2)
-	// 	col2 = quads.NewBoxCollider2D(2, 2)
+	// 	col1 = quads.NewBoxCollider2D(1, 1)
+	// 	col2 = quads.NewBoxCollider2D(1, 1)
 
 	// 	col1.PosReadWrite().Set(0, 0, 4)
-	// 	col1.ScaleReadWrite().Set(1, 1, 1)
+	// 	col1.ScaleReadWrite().Set(2, 2, 1)
 
 	// 	col2.PosReadWrite().Set(2, 0, 4.1)
-	// 	col2.ScaleReadWrite().Set(1, 1, 1)
+	// 	col2.ScaleReadWrite().Set(2, 2, 1)
 
 	// 	println(col1.PosRead().String(), col1.BotLeft().String(), "; ", col1.TopRight().String())
 	// 	println(col2.PosRead().String(), col2.BotLeft().String(), "; ", col2.TopRight().String())
@@ -380,6 +550,8 @@ func (g *Game) Render() {
 	// g.win.Rend.Draw(col1.Mesh, col1.ModelMat(), simpleMat)
 	// g.win.Rend.Draw(col1.Mesh, col2.ModelMat(), simpleMat)
 	// simpleMat.SetUnifVec3("tintColor", gglm.NewVec3(1, 1, 1))
+
+	g.DrawScore()
 }
 
 // var col1, col2 *quads.BoxCollider2D
