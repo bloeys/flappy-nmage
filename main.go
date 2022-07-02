@@ -16,9 +16,7 @@ import (
 	"github.com/veandco/go-sdl2/sdl"
 )
 
-//TODO: Lose if bird goes outside screen
 //TODO: Sounds!
-//TODO: Way of displaying colliders that takes into account their width and height.
 
 const (
 	pipeXSpacing float32 = 6
@@ -31,6 +29,16 @@ const (
 	GameState_Playing GameState = iota
 	GameState_Lost
 )
+
+var _ engine.Game = &Game{}
+
+type Game struct {
+	win       *engine.Window
+	imguiInfo nmageimgui.ImguiInfo
+	gameState GameState
+
+	BaseObj *quads.BoxCollider2D
+}
 
 var (
 	game *Game
@@ -82,22 +90,12 @@ func main() {
 	window.SDLWin.SetTitle("Flappy Bird")
 
 	game = &Game{
-		shouldRun: true,
 		win:       window,
 		imguiInfo: nmageimgui.NewImGUI(),
 		gameState: GameState_Playing,
 	}
 
-	engine.Run(game)
-}
-
-var _ engine.Game = &Game{}
-
-type Game struct {
-	shouldRun bool
-	win       *engine.Window
-	imguiInfo nmageimgui.ImguiInfo
-	gameState GameState
+	engine.Run(game, game.win, game.imguiInfo)
 }
 
 func (g *Game) Init() {
@@ -117,6 +115,17 @@ func (g *Game) Init() {
 		panic("Failed to load sprite. Err:" + err.Error())
 	}
 
+	g.BaseObj = quads.NewBoxCollider2D(1, 1)
+	if err != nil {
+		panic("Failed to load sprite. Err:" + err.Error())
+	}
+
+	tempQ, err := quads.NewQuad("base", "./res/textures/base.png")
+	if err != nil {
+		panic("Failed to load sprite. Err:" + err.Error())
+	}
+	g.BaseObj.Quad = *tempQ
+
 	simpleMat = materials.NewMaterial("simpleMat", "./res/shaders/simple")
 	digitMat = materials.NewMaterial("digitMat", "./res/shaders/simple")
 
@@ -133,13 +142,20 @@ func (g *Game) Init() {
 	simpleMat.SetUnifMat4("projMat", &projMat.Mat4)
 	digitMat.SetUnifMat4("projMat", &projMat.Mat4)
 
+	//Fonts
+	font = g.imguiInfo.AddFontTTF("./res/fonts/courier-prime.regular.ttf", 64, nil, nil)
+
 	//Set positions
 	birdSprite.ScaleReadWrite().Set(1.5, 2, 1)
 	birdSprite.PosReadWrite().Set(-5, 0, 2)
 
-	font = g.imguiInfo.AddFontTTF("./res/fonts/courier-prime.regular.ttf", 64, nil, nil)
+	backgroundSprite.Entity.ScaleReadWrite().Set(20, 20, 1)
+
+	g.BaseObj.Entity.ScaleReadWrite().Set(20, 5, 1)
+	g.BaseObj.Entity.PosReadWrite().Set(0, -11, 1.1)
 
 	g.LoadDigitQuads()
+	g.InitPipes()
 }
 
 func (g *Game) LoadDigitQuads() {
@@ -207,15 +223,12 @@ func (g *Game) LoadDigitQuads() {
 	digitQuads = append(digitQuads, digit)
 }
 
-func (g *Game) Start() {
+func (g *Game) InitPipes() {
 
-	backgroundSprite.Entity.ScaleReadWrite().Set(20, 20, 1)
-
-	//Pipes
 	pos := gglm.NewVec3(12, 0, 0)
 	for i := 0; i < 10; i++ {
 
-		randY := rand.Float32() * 5
+		randY := rand.Float32() * 4
 		if rand.Float32() > 0.5 {
 			randY *= -1
 		}
@@ -241,7 +254,6 @@ func (g *Game) Start() {
 		pipePos = p.PosRead()
 		p.Col.PosReadWrite().Set(pipePos.X(), pipePos.Y(), pipePos.Z()+0.1)
 		*p.Col.ScaleReadWrite() = *p.ScaleRead()
-		// *p.Col.RotReadWrite() = *p.RotRead()
 
 		pipes = append(pipes, p)
 
@@ -249,13 +261,10 @@ func (g *Game) Start() {
 	}
 }
 
-func (g *Game) FrameStart() {
-}
-
 func (g *Game) Update() {
 
 	if input.IsQuitClicked() || input.KeyClicked(sdl.K_ESCAPE) {
-		g.shouldRun = false
+		engine.Quit()
 	}
 
 	switch g.gameState {
@@ -264,7 +273,6 @@ func (g *Game) Update() {
 	case GameState_Lost:
 		g.Lost()
 	}
-
 }
 
 func (g *Game) Playing() {
@@ -364,6 +372,16 @@ func (g *Game) Playing() {
 		score++
 		lastTouchedMiddleCol = pipes[i].MiddleCol
 	}
+
+	//Base collision
+	if isColliding(birdBoxCol, g.BaseObj) {
+		g.gameState = GameState_Lost
+	}
+
+	//Going too high
+	if birdPos.Y() >= 12 {
+		g.gameState = GameState_Lost
+	}
 }
 
 func (g *Game) DrawScore() {
@@ -384,7 +402,6 @@ func (g *Game) DrawScore() {
 	score = origScore
 	var xOffsetDelta float32 = 1.6
 	xOffset := float32(digitCount-1) * xOffsetDelta * 0.5
-	digitMat.SetAttribute(digitQuads[0].Mesh.Buf)
 	for i := 0; i < 1 || score > 0; i++ {
 
 		digit := score % 10
@@ -485,13 +502,16 @@ func (g *Game) Render() {
 
 	//Draw background
 	simpleMat.DiffuseTex = backgroundSprite.Tex.TexID
-	simpleMat.SetAttribute(backgroundSprite.Mesh.Buf)
 	simpleMat.Bind()
 	g.win.Rend.Draw(backgroundSprite.Mesh, backgroundSprite.ModelMat(), simpleMat)
 
+	//Draw base
+	simpleMat.DiffuseTex = g.BaseObj.Tex.TexID
+	simpleMat.Bind()
+	g.win.Rend.Draw(g.BaseObj.Mesh, g.BaseObj.ModelMat(), simpleMat)
+
 	//Draw pipe
 	simpleMat.DiffuseTex = pipes[0].Tex.TexID
-	simpleMat.SetAttribute(pipes[0].Mesh.Buf)
 	simpleMat.Bind()
 	for i := 0; i < len(pipes); i++ {
 		g.win.Rend.Draw(pipes[0].Mesh, pipes[i].ModelMat(), simpleMat)
@@ -499,7 +519,6 @@ func (g *Game) Render() {
 
 	// //Draw pipe colliders
 	// simpleMat.DiffuseTex = pipes[0].Col.Tex.TexID
-	// simpleMat.SetAttribute(pipes[0].Col.Mesh.Buf)
 	// simpleMat.Bind()
 
 	// //First pipe collider is red
@@ -514,38 +533,18 @@ func (g *Game) Render() {
 
 	//Draw bird
 	simpleMat.DiffuseTex = birdSprite.Tex.TexID
-	simpleMat.SetAttribute(birdSprite.Mesh.Buf)
 	simpleMat.Bind()
 	g.win.Rend.Draw(birdSprite.Mesh, birdSprite.ModelMat(), simpleMat)
 
 	// //Draw bird collider
 	// simpleMat.SetUnifVec3("tintColor", gglm.NewVec3(0, 1, 0))
 	// simpleMat.DiffuseTex = birdBoxCol.Tex.TexID
-	// simpleMat.SetAttribute(birdBoxCol.Mesh.Buf)
 	// simpleMat.Bind()
 	// g.win.Rend.Draw(birdBoxCol.Mesh, birdBoxCol.ModelMat(), simpleMat)
 	// simpleMat.SetUnifVec3("tintColor", gglm.NewVec3(1, 1, 1))
 
-	// //Test pipe
-	// if col1 == nil {
-
-	// 	col1 = quads.NewBoxCollider2D(1, 1)
-	// 	col2 = quads.NewBoxCollider2D(1, 1)
-
-	// 	col1.PosReadWrite().Set(0, 0, 4)
-	// 	col1.ScaleReadWrite().Set(2, 2, 1)
-
-	// 	col2.PosReadWrite().Set(2, 0, 4.1)
-	// 	col2.ScaleReadWrite().Set(2, 2, 1)
-
-	// 	println(col1.PosRead().String(), col1.BotLeft().String(), "; ", col1.TopRight().String())
-	// 	println(col2.PosRead().String(), col2.BotLeft().String(), "; ", col2.TopRight().String())
-	// 	println(isColliding(col1, col2))
-	// }
-
 	// simpleMat.SetUnifVec3("tintColor", gglm.NewVec3(1, 0, 0))
 	// simpleMat.DiffuseTex = col1.Tex.TexID
-	// simpleMat.SetAttribute(col1.Mesh.Buf)
 	// simpleMat.Bind()
 	// g.win.Rend.Draw(col1.Mesh, col1.ModelMat(), simpleMat)
 	// g.win.Rend.Draw(col1.Mesh, col2.ModelMat(), simpleMat)
@@ -554,24 +553,10 @@ func (g *Game) Render() {
 	g.DrawScore()
 }
 
-// var col1, col2 *quads.BoxCollider2D
-
 func (g *Game) FrameEnd() {
 
 }
 
-func (g *Game) ShouldRun() bool {
-	return g.shouldRun
-}
-
-func (g *Game) GetWindow() *engine.Window {
-	return g.win
-}
-
-func (g *Game) GetImGUI() nmageimgui.ImguiInfo {
-	return g.imguiInfo
-}
-
-func (g *Game) Deinit() {
+func (g *Game) DeInit() {
 
 }

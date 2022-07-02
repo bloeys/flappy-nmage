@@ -3,8 +3,8 @@ module github.com/bloeys/flappy-nmage
 go 1.18
 
 require (
-	github.com/bloeys/gglm v0.40.11
-	github.com/bloeys/nmage v0.11.12
+	github.com/bloeys/gglm v0.41.10
+	github.com/bloeys/nmage v0.12.11
 	github.com/inkyblackness/imgui-go/v4 v4.3.0
 	github.com/veandco/go-sdl2 v0.4.10
 )

@@ -21,7 +21,7 @@ func NewQuad(spriteName, spritePath string) (*Quad, error) {
 		return nil, err
 	}
 
-	spriteTex, err := assets.LoadPNGTexture(spritePath)
+	spriteTex, err := assets.LoadPNGTexture(spritePath, nil)
 	if err != nil {
 		return nil, err
 	}
