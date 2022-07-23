@@ -12,11 +12,10 @@ import (
 	"github.com/bloeys/nmage/renderer/rend3dgl"
 	"github.com/bloeys/nmage/timing"
 	nmageimgui "github.com/bloeys/nmage/ui/imgui"
+	"github.com/bloeys/wavy"
 	"github.com/inkyblackness/imgui-go/v4"
 	"github.com/veandco/go-sdl2/sdl"
 )
-
-//TODO: Sounds!
 
 const (
 	pipeXSpacing float32 = 6
@@ -66,6 +65,11 @@ var (
 
 	//Digit quads
 	digitQuads []*quads.Quad
+
+	// Sounds
+	jumpSound  *wavy.Sound
+	scoreSound *wavy.Sound
+	dieSound   *wavy.Sound
 )
 
 func main() {
@@ -153,6 +157,27 @@ func (g *Game) Init() {
 
 	g.BaseObj.Entity.ScaleReadWrite().Set(20, 5, 1)
 	g.BaseObj.Entity.PosReadWrite().Set(0, -11, 1.1)
+
+	// Sounds
+	err = wavy.Init(wavy.SampleRate_44100, wavy.SoundChannelCount_2, wavy.SoundBitDepth_2)
+	if err != nil {
+		panic("Failed to init wavy. Err: " + err.Error())
+	}
+
+	jumpSound, err = wavy.NewSoundMem("./res/sounds/jump.mp3")
+	if err != nil {
+		panic("Failed to create new sound. Err: " + err.Error())
+	}
+
+	scoreSound, err = wavy.NewSoundMem("./res/sounds/score.mp3")
+	if err != nil {
+		panic("Failed to create new sound. Err: " + err.Error())
+	}
+
+	dieSound, err = wavy.NewSoundMem("./res/sounds/die.mp3")
+	if err != nil {
+		panic("Failed to create new sound. Err: " + err.Error())
+	}
 
 	g.LoadDigitQuads()
 	g.InitPipes()
@@ -276,6 +301,7 @@ func (g *Game) Update() {
 }
 
 func (g *Game) Playing() {
+
 	//Move the bird
 	if birdVelocity.Y() > 0 {
 		birdVelocity.SetY(birdVelocity.Y() * dragAmount)
@@ -283,7 +309,12 @@ func (g *Game) Playing() {
 
 	birdVelocity.SetY(birdVelocity.Y() + gravity*timing.DT())
 	if input.KeyClicked(sdl.K_SPACE) {
+
 		birdVelocity.SetY(jumpForce)
+
+		s := wavy.ClipInMemSoundPercent(jumpSound, 0, 1)
+		s.SeekToPercent(0)
+		s.PlayAsync()
 	}
 
 	positionDelta := *birdVelocity
@@ -355,6 +386,7 @@ func (g *Game) Playing() {
 		}
 
 		g.gameState = GameState_Lost
+		break
 	}
 
 	//Pipe score collisions
@@ -371,16 +403,20 @@ func (g *Game) Playing() {
 
 		score++
 		lastTouchedMiddleCol = pipes[i].MiddleCol
+
+		scoreSound.SeekToPercent(0)
+		scoreSound.PlayAsync()
+		break
 	}
 
 	//Base collision
-	if isColliding(birdBoxCol, g.BaseObj) {
+	if isColliding(birdBoxCol, g.BaseObj) || birdPos.Y() >= 12 {
 		g.gameState = GameState_Lost
 	}
 
-	//Going too high
-	if birdPos.Y() >= 12 {
-		g.gameState = GameState_Lost
+	if g.gameState == GameState_Lost {
+		dieSound.SeekToPercent(0)
+		dieSound.PlayAsync()
 	}
 }
 
